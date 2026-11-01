@@ -53,3 +53,11 @@ describe("models", () => {
     expect(t.lines.join("\n")).not.toContain("x/c");
   });
 });
+
+describe("skill", () => {
+  it("lets an agent finish a run once the user has approved the estimate", () => {
+    const skill = readFileSync("skills/llm-focus-group/SKILL.md", "utf8");
+    expect(skill).toMatch(/--yes` only after/);
+    expect(skill).not.toMatch(/Never pass/);
+  });
+});

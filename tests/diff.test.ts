@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import { runSession, type RunRecord } from "../src/protocol.js";
 import { mockAsk, type Ask } from "../src/providers.js";
 import { createRunDir } from "../src/runs.js";
 import type { Study } from "../src/types.js";
-import { study } from "./helpers.js";
+import { candidate, study } from "./helpers.js";
 
 let root: string;
 const o = (objection: string, count: number, candidate = "Acme"): Objection => ({ candidate, objection, runsRaised: Array.from({ length: count }, (_, i) => i), quote: "q", materialSilent: false });
@@ -107,6 +107,55 @@ describe("diffRuns", () => {
     const out = await diffRuns(await make(one, []), await make(one, []), mockAsk);
     expect(out).not.toContain("| Stage");
     expect(out).toContain("single-candidate");
+  });
+  it("refuses an unfinished run", async () => {
+    const a = await make(five, []);
+    const b = await make({ ...five, runs: 5 }, []);
+    const partial = JSON.parse(readFileSync(join(a, "results.json"), "utf8"));
+    writeFileSync(join(a, "results.json"), JSON.stringify({ ...partial, runs: partial.runs.slice(0, 2) }));
+    await expect(diffRuns(a, b, mockAsk)).rejects.toThrow(/isn't finished/);
+  });
+  it("refuses a run that stopped before its ledger", async () => {
+    const a = await make(five, []);
+    const partial = JSON.parse(readFileSync(join(a, "results.json"), "utf8"));
+    writeFileSync(join(a, "results.json"), JSON.stringify({ ...partial, finished: false }));
+    await expect(diffRuns(a, await make(five, []), mockAsk)).rejects.toThrow(/isn't finished/);
+  });
+  it("warns when run counts or blinding differ", async () => {
+    const out = await diffRuns(await make(five, []), await make({ ...five, runs: 2, blind: true }, []), mockAsk);
+    expect(out).toMatch(/Runs differ/);
+    expect(out).toMatch(/Blinding differ/);
+  });
+  it("retries a bad matching reply, then says matching failed", async () => {
+    let n = 0;
+    const ask: Ask = async () => { n++; return { text: "cut off {", usage: { inputTokens: 0, outputTokens: 0 } }; };
+    const out = await diffRuns(await make(five, [o("One", 3)]), await make(five, [o("Two", 3)]), ask);
+    expect(n).toBe(2);
+    expect(out).toMatch(/matching failed/i);
+  });
+  it("does not save a bad matching reply", async () => {
+    const a = await make(five, [o("One", 3)]);
+    const b = await make(five, [o("Two", 3)]);
+    await diffRuns(a, b, async () => ({ text: "nope", usage: { inputTokens: 0, outputTokens: 0 } }));
+    const good: Ask = async () => ({ text: JSON.stringify({ matches: [[0, 0]] }), usage: { inputTokens: 0, outputTokens: 0 } });
+    expect(await diffRuns(a, b, good)).not.toMatch(/matching failed/i);
+  });
+  it("treats an added candidate as changed, not as baseline", async () => {
+    const added = { ...five, candidates: [...five.candidates, candidate("Newco")] };
+    const out = await diffRuns(await make(five, []), await make(added, [o("Fresh", 4, "Newco")]), mockAsk);
+    expect(out.split("## Noise baseline")[1]?.split("##")[0]).not.toContain("Fresh");
+  });
+  it("does not mark the last file changed when a file is added", async () => {
+    const one = { ...five, candidates: five.candidates.map((c) => (c.name === "Acme" ? { ...c, material: "--- a.md ---\nsame" } : c)) };
+    const two = { ...five, candidates: five.candidates.map((c) => (c.name === "Acme" ? { ...c, material: "--- a.md ---\nsame\n\n--- b.md ---\nnew" } : c)) };
+    const out = await diffRuns(await make(one, []), await make(two, []), mockAsk);
+    expect(out).toContain("Acme: b.md");
+  });
+  it("keeps a candidate starting with Other out of the Other column", async () => {
+    const s = study({ rounds: 1, runs: 1, candidates: [candidate("Otherworld"), candidate("Zed")] });
+    const pick = (r: RunRecord) => r.ballots.forEach((b) => { b.label = "Otherworld"; });
+    const out = await diffRuns(await make(s, [], pick), await make(s, [], pick), mockAsk);
+    expect(out).toMatch(/\| After reading \| 3\/3 \| 3\/3 \| 0\/3 \| 0\/3 \| 0\/3 \| 0\/3 \|/);
   });
   it("never says a change worked", async () => {
     const out = (await diffRuns(await make(five, [o("X", 5)]), await make(five, []), mockAsk)).toLowerCase();

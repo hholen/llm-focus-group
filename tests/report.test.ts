@@ -54,6 +54,11 @@ describe("renderReport", () => {
     const { s, runs } = await session();
     expect(renderReport(s, runs, ledger, usage, [], 2)).toMatch(/2 objections were dropped/);
   });
+  it("keeps a candidate starting with Other out of the Other row", async () => {
+    const { s, runs } = await session({ candidates: [candidate("Otherworld"), candidate("Zed")] });
+    for (const r of runs) for (const b of r.ballots) b.label = "Otherworld";
+    expect(renderReport(s, runs, ledger, usage)).toMatch(/\| Other \| 0 \| 0 \| 0 \|/);
+  });
   it("contains no winner line", async () => {
     const { s, runs } = await session();
     expect(renderReport(s, runs, ledger, usage).toLowerCase()).not.toContain("winner");

@@ -36,6 +36,18 @@ describe("extractLedger", () => {
     await extractLedger(s, runs, reply({ objections: [obj({ quote: "invented" }), obj()] }), (n) => { dropped = n; });
     expect(dropped).toBe(1);
   });
+  it("treats a malformed entry as dropped instead of crashing", async () => {
+    const runs = [await runSession(s, 0, mockAsk)];
+    let dropped = 0;
+    const out = await extractLedger(s, runs, reply({ objections: [null, obj({ objection: undefined }), obj()] }), (n) => { dropped = n; });
+    expect(out.length).toBe(1);
+    expect(dropped).toBe(2);
+  });
+  it("accepts a single run number", async () => {
+    const runs = [await runSession(s, 0, mockAsk)];
+    const [first] = await extractLedger(s, runs, reply({ objections: [obj({ runsRaised: 0 })] }));
+    expect(first?.runsRaised).toEqual([0]);
+  });
   it("removes run numbers that do not exist", async () => {
     const runs = [await runSession(s, 0, mockAsk)];
     const [first] = await extractLedger(s, runs, reply({ objections: [obj({ runsRaised: [0, 0, 7] })] }));

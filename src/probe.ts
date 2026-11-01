@@ -51,7 +51,7 @@ const neutralPrompt = (probe: Probe): string => `NEUTRALISE PROBE. A researcher 
 
 "${probe.change}"
 
-Rewrite it as one neutral question to the panel. State the change as a hypothetical and ask whether it changes their pick. Keep every fact and number exact, and add none. Don't suggest the change is good, bad, important or likely to matter, and don't say why it is being asked.
+Rewrite it as one neutral question to the panel. State the change as a hypothetical and ask whether it changes their pick. Keep every fact and number exact and in the same order, and add none. Don't suggest the change is good, bad, important or likely to matter, and don't say why it is being asked.
 
 Reply with only JSON: {"question": string}`;
 
@@ -59,10 +59,8 @@ function readQuestion(text: string, probe: Probe): string | null {
   try {
     const question = (JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? "") as { question?: string }).question?.trim();
     if (!question) return null;
-    const found = numbers(question);
-    const kept = numbers(probe.change);
-    // A rewrite must test the same change, so its numbers must match exactly.
-    return kept.every((n) => found.includes(n)) && found.every((n) => kept.includes(n)) ? question : null;
+    // A rewrite must test the same change, so its numbers must match in value, count and order.
+    return numbers(question).join(" ") === numbers(probe.change).join(" ") ? question : null;
   } catch {
     return null;
   }
@@ -140,7 +138,7 @@ export function renderProbeReport(study: Study, runs: RunRecord[], probes: Probe
   const placeboMax = Math.max(0, ...probes.filter((p) => p.placebo).map((p) => moved(p).length));
   const finals = runs.flatMap((r) => r.ballots).filter((b) => b.stage === final);
   const names = study.candidates.map((c) => c.name);
-  const count = (labels: string[], name: string) => labels.filter((l) => l === name).length;
+  const count = (labels: string[], name: string) => labels.filter((l) => (name === "Other" ? l.startsWith("Other: ") : l === name)).length;
 
   const out = [
     `# Probes: ${names.join(" vs ")}`,
@@ -155,7 +153,7 @@ export function renderProbeReport(study: Study, runs: RunRecord[], probes: Probe
     ``,
     `| Choice | After discussion | ${probes.map((p) => p.id).join(" | ")} |`,
     `|---|---|${probes.map(() => "---").join("|")}|`,
-    ...names.map((name) => `| ${name} | ${count(finals.map((b) => b.label), name)} | ${probes.map((p) => count(of(p).map((b) => b.label), name)).join(" | ")} |`),
+    ...[...names, "Other"].map((name) => `| ${name} | ${count(finals.map((b) => b.label), name)} | ${probes.map((p) => count(of(p).map((b) => b.label), name)).join(" | ")} |`),
     ``,
     `## Wording`,
     ``,

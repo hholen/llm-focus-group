@@ -13,12 +13,16 @@ type Pair = [Objection, Objection];
 const files = (material: string): Map<string, string> => {
   const parts = material.split(/^--- (.+?) ---$/m).slice(1);
   const out = new Map<string, string>();
-  for (let i = 0; i + 1 < parts.length; i += 2) out.set(parts[i] as string, parts[i + 1] as string);
+  for (let i = 0; i + 1 < parts.length; i += 2) out.set(parts[i] as string, (parts[i + 1] as string).trim());
   return out;
 };
 
-const editedCandidates = (a: Study, b: Study): Set<string> =>
-  new Set(a.candidates.filter((c) => b.candidates.find((other) => other.name === c.name)?.material !== c.material).map((c) => c.name));
+/** Candidates added or removed count as edited, because neither run shows them unchanged. */
+const editedCandidates = (a: Study, b: Study): Set<string> => {
+  const material = (s: Study, name: string) => s.candidates.find((c) => c.name === name)?.material;
+  const names = [...a.candidates, ...b.candidates].map((c) => c.name);
+  return new Set(names.filter((name) => material(a, name) !== material(b, name)));
+};
 
 function materialChanges(a: Study, b: Study): string[] {
   const out: string[] = [];
@@ -41,6 +45,8 @@ function setupWarnings(a: Snapshot, b: Snapshot): string[] {
     ["Model IDs", list(a.study, (s) => s.model), list(b.study, (s) => s.model)],
     ["Provider routes", list(a.study, (s) => s.route), list(b.study, (s) => s.route)],
     ["Rounds", String(a.study.rounds), String(b.study.rounds)],
+    ["Runs", String(a.study.runs), String(b.study.runs)],
+    ["Blinding", String(a.study.blind), String(b.study.blind)],
     ["Candidates", a.study.candidates.map((c) => c.name).join(", "), b.study.candidates.map((c) => c.name).join(", ")],
     ["Tool version", a.toolVersion, b.toolVersion],
   ];
@@ -52,13 +58,14 @@ const matchPrompt = (a: Objection[], b: Objection[]): string => {
   return `MATCH OBJECTIONS from two focus group runs. Pair items only when they make the same point about the same candidate.\n\nRUN A\n${list(a)}\n\nRUN B\n${list(b)}\n\nReply with only JSON: {"matches": [[a_number, b_number]]}`;
 };
 
-function parsePairs(text: string, a: Objection[], b: Objection[]): Pair[] {
+function parsePairs(text: string, a: Objection[], b: Objection[]): Pair[] | null {
   try {
     const raw = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? "") as { matches?: [number, number][] };
+    if (!Array.isArray(raw.matches)) return null;
     const seenA = new Set<number>();
     const seenB = new Set<number>();
     const pairs: Pair[] = [];
-    for (const [x, y] of raw.matches ?? []) {
+    for (const [x, y] of raw.matches) {
       const left = a[x];
       const right = b[y];
       if (!left || !right || left.candidate !== right.candidate || seenA.has(x) || seenB.has(y)) continue;
@@ -68,12 +75,12 @@ function parsePairs(text: string, a: Objection[], b: Objection[]): Pair[] {
     }
     return pairs;
   } catch {
-    return [];
+    return null;
   }
 }
 
 /** Wording varies between runs, so exact matches go first and one model call pairs the rest. */
-async function pairObjections(a: Objection[], b: Objection[], seat: Seat, ask: Ask): Promise<Pair[]> {
+async function pairObjections(a: Objection[], b: Objection[], seat: Seat, ask: Ask): Promise<{ pairs: Pair[]; failed: boolean }> {
   const key = (o: Objection) => `${o.candidate}\n${o.objection.toLowerCase().trim()}`;
   const pairs: Pair[] = [];
   const restB = [...b];
@@ -84,17 +91,21 @@ async function pairObjections(a: Objection[], b: Objection[], seat: Seat, ask: A
     return false;
   });
   if (restA.length && restB.length) {
-    const reply = await ask(seat, seatSystem(seat), matchPrompt(restA, restB));
-    pairs.push(...parsePairs(reply.text, restA, restB));
+    const body = matchPrompt(restA, restB);
+    const options = { valid: (text: string) => parsePairs(text, restA, restB) !== null };
+    const read = async (prompt: string) => parsePairs((await ask(seat, seatSystem(seat), prompt, options)).text, restA, restB);
+    const matched = (await read(body)) ?? (await read(`${body}\n\nYour last reply was not valid JSON.`));
+    if (!matched) return { pairs, failed: true };
+    pairs.push(...matched);
   }
-  return pairs;
+  return { pairs, failed: false };
 }
 
 const stageTable = (a: Study, runsA: RunRecord[], b: Study, runsB: RunRecord[]): string[] => {
   const names = [...new Set([...a.candidates, ...b.candidates].map((c) => c.name)), "Other"];
   const count = (runs: RunRecord[], stage: Stage, name: string) => {
     const rows: BallotRecord[] = runs.flatMap((r) => r.ballots).filter((x) => x.stage === stage);
-    const hits = rows.filter((x) => (name === "Other" ? x.label.startsWith("Other") : x.label === name)).length;
+    const hits = rows.filter((x) => (name === "Other" ? x.label.startsWith("Other: ") : x.label === name)).length;
     return `${hits}/${rows.length}`;
   };
   const stages: [string, Stage, Stage][] = [
@@ -110,13 +121,16 @@ const stageTable = (a: Study, runsA: RunRecord[], b: Study, runsB: RunRecord[]):
   ];
 };
 
-export async function diffRuns(dirA: string, dirB: string, ask: Ask): Promise<string> {
+export async function diffRuns(dirA: string, dirB: string, ask: Ask, { save = true } = {}): Promise<string> {
   const a = loadRun(dirA);
   const b = loadRun(dirB);
+  for (const [dir, run] of [[dirA, a], [dirB, b]] as const) {
+    if (!run.finished || run.runs.length < run.snapshot.study.runs) throw new Error(`Run ${dir} isn't finished. Resume it first.`);
+  }
   const totalA = a.runs.length;
   const totalB = b.runs.length;
   const seat = b.snapshot.study.seats[0] as Seat;
-  const pairs = await pairObjections(a.ledger, b.ledger, seat, journalled(ask, join(dirB, "diff-calls.jsonl")));
+  const { pairs, failed } = await pairObjections(a.ledger, b.ledger, seat, journalled(ask, join(dirB, "diff-calls.jsonl")));
 
   const counted = (o: Objection, total: number) => `${o.runsRaised.length} of ${total}`;
   const rateA = (o: Objection) => (totalA ? o.runsRaised.length / totalA : 0);
@@ -144,7 +158,10 @@ export async function diffRuns(dirA: string, dirB: string, ask: Ask): Promise<st
     ? ["No baseline: every candidate's material changed, so nothing here shows the noise level."]
     : [`${baseline.length} of ${unchangedTotal} objections about unchanged products moved by at least half the runs. With no edit to those products, these are noise or knock-on effects from the other changes. Read the clear changes above against this rate.`, ``, ...none(baseline)];
 
-  const warnings = setupWarnings(a.snapshot, b.snapshot);
+  const warnings = [
+    ...setupWarnings(a.snapshot, b.snapshot),
+    ...(failed ? ["- **Objection matching failed:** differently worded objections were not paired, so the gone, new and clear change lists are overstated. Run diff again."] : []),
+  ];
   const out = [
     `# Diff`,
     ``,
@@ -196,6 +213,6 @@ export async function diffRuns(dirA: string, dirB: string, ask: Ask): Promise<st
       : stageTable(a.snapshot.study, a.runs, b.snapshot.study, b.runs)),
     ``,
   ].join("\n");
-  writeFileSync(join(dirB, "diff.md"), out);
+  if (save) writeFileSync(join(dirB, "diff.md"), out);
   return out;
 }

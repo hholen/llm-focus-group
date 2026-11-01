@@ -6,7 +6,7 @@ import type { Seat, Study } from "./types.js";
 
 const provider = (seat: Seat) => (seat.route === "anthropic" ? "anthropic" : (seat.model.split("/")[0] ?? seat.model));
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-const bucket = (label: string) => (label.startsWith("Other") ? "Other" : label);
+const bucket = (label: string) => (label.startsWith("Other: ") ? "Other" : label);
 
 function warnings(study: Study, runs: RunRecord[], dropped: number): string[] {
   const out: string[] = [];

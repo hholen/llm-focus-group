@@ -50,6 +50,15 @@ describe("neutralise", () => {
     const ask: Ask = async () => text('{"question":"What if Pro held 600 assets?"}');
     await expect(neutralise(s, probes, ask)).rejects.toThrow(/cap-500/);
   });
+  it("rejects a rewrite that swaps numbers", async () => {
+    const probe: Probe = { id: "swap", change: "It covers 10 users instead of 5.", placebo: false };
+    const ask: Ask = async () => text('{"question":"What if it covered 5 users instead of 10?"}');
+    await expect(neutralise(s, [probe], ask)).rejects.toThrow(/swap/);
+  });
+  it("rejects a rewrite that repeats a number", async () => {
+    const ask: Ask = async () => text('{"question":"If 500 assets, or 500 more, would your pick change?"}');
+    await expect(neutralise(s, [probes[0]!], ask)).rejects.toThrow(/cap-500/);
+  });
   it("retries a rejected rewrite once", async () => {
     let n = 0;
     const ask: Ask = async () => text(n++ ? '{"question":"If Pro held 500 assets, would your pick change?"}' : '{"question":"Wow, 900!"}');
@@ -106,6 +115,9 @@ describe("renderProbeReport", () => {
   });
   it("counts moved picks against the saved final ballot", async () => {
     expect(await render([b("cap-500", "Claude", "Acme"), b("cap-500", "GPT", "Zed")])).toMatch(/cap-500[^\n]*1 of 2/);
+  });
+  it("shows picks that moved outside the candidates", async () => {
+    expect(await render([b("cap-500", "Claude", "Other: Rival")])).toMatch(/\| Other \| 0 \| 1 \| 0 \|/);
   });
   it("marks a probe that moved no more than the placebo", async () => {
     const out = await render([b("cap-500", "Claude", "Acme"), b("cap-260", "Claude", "Acme")]);

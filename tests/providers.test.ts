@@ -47,6 +47,17 @@ describe("realAsk", () => {
     expect(always).toHaveBeenCalledTimes(4);
     expect(fn).toBeDefined();
   });
+  it("retries a network error", async () => {
+    const fn = vi.fn(async () => { if (fn.mock.calls.length === 1) throw new TypeError("fetch failed"); return chat("ok"); });
+    vi.stubGlobal("fetch", fn);
+    expect((await realAsk(gpt, "s", "p")).text).toBe("ok");
+  });
+  it("gives up after repeated network errors", async () => {
+    const fn = vi.fn(async () => { throw new TypeError("fetch failed"); });
+    vi.stubGlobal("fetch", fn);
+    await expect(realAsk(gpt, "s", "p")).rejects.toThrow(/fetch failed/);
+    expect(fn).toHaveBeenCalledTimes(4);
+  });
   it("does not retry a 401", async () => {
     const fn = stub(json({}, 401));
     await expect(realAsk(gpt, "s", "p")).rejects.toThrow(/401/);

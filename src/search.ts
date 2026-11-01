@@ -1,6 +1,6 @@
 import { labelUnprompted } from "./ballots.js";
 import { getKey } from "./keys.js";
-import { post, type Usage } from "./providers.js";
+import { post, type AnthropicResponse, type Usage } from "./providers.js";
 import type { Candidate, Seat, Study } from "./types.js";
 
 export interface SearchResult {
@@ -30,7 +30,7 @@ async function once(study: Study, run: number, seat: Seat): Promise<SearchResult
   const out: SearchResult = { model: seat.model, run, choice: "", label: "No ballot", queries: [], urls: [], cited: [], searches: 0, usage: { inputTokens: 0, outputTokens: 0 } };
   let text = "";
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const data = await post("https://api.anthropic.com/v1/messages", key, { "x-api-key": key, "anthropic-version": "2023-06-01" }, {
+    const data = await post<AnthropicResponse>("https://api.anthropic.com/v1/messages", key, { "x-api-key": key, "anthropic-version": "2023-06-01" }, {
       model: seat.model,
       max_tokens: 4000,
       messages,
@@ -41,9 +41,9 @@ async function once(study: Study, run: number, seat: Seat): Promise<SearchResult
     out.searches += data.usage?.server_tool_use?.web_search_requests ?? 0;
     for (const b of data.content ?? []) {
       if (b.type === "server_tool_use" && b.input?.query) out.queries.push(b.input.query);
-      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) for (const r of b.content) if (r.url) out.urls.push(r.url);
+      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) for (const r of b.content as { url?: string }[]) if (r.url) out.urls.push(r.url);
       if (b.type === "text") {
-        text += b.text;
+        text += b.text ?? "";
         for (const c of b.citations ?? []) if (c.url) out.cited.push(c.url);
       }
     }

@@ -33,15 +33,13 @@ export function labelExact(choice: string, names: string[]): string {
   return names.find((name) => name.toLowerCase() === clean.toLowerCase()) ?? other(clean);
 }
 
-const NEGATION = /^(not|no|none|anything but|avoid)\b/i;
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** For the free-text unprompted ballot: a name anywhere in the answer, longest name first. */
 export function labelUnprompted(choice: string, names: string[]): string {
   const clean = choice.trim();
-  if (NEGATION.test(clean)) return other(clean);
   const longestFirst = [...names].sort((a, b) => b.length - a.length);
-  const found = longestFirst.find((name) => new RegExp(`(^|[^\\p{L}\\p{N}])${escape(name)}($|[^\\p{L}\\p{N}])`, "iu").test(clean));
-  if (found && new RegExp(`\\b(not|never|avoid|except|but)\\s+(the\\s+)?${escape(found)}`, "iu").test(clean)) return other(clean);
-  return found ?? other(clean);
+  const named = (name: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${escape(name)}($|[^\\p{L}\\p{N}])`, "iu").test(clean);
+  const negated = (name: string) => new RegExp(`(^|[^\\p{L}\\p{N}-])(not|no|never|avoid|except|anything but)\\s+(the\\s+)?${escape(name)}`, "iu").test(clean);
+  return longestFirst.find((name) => named(name) && !negated(name)) ?? other(clean);
 }

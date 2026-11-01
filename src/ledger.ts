@@ -39,13 +39,21 @@ ${evidence(runs)}
 
 Reply with only JSON: {"objections": [{"candidate": string, "objection": string, "runsRaised": number[], "quote": string, "materialSilent": boolean}]}`;
 
-function parse(text: string): Objection[] | null {
+function parse(text: string): unknown[] | null {
   try {
-    const raw = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? "") as { objections?: Objection[] };
+    const raw = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? "") as { objections?: unknown[] };
     return Array.isArray(raw.objections) ? raw.objections : null;
   } catch {
     return null;
   }
+}
+
+/** Replies are journalled, so a malformed entry must be dropped here, or it would crash every resume. */
+function clean(entry: unknown): Objection | null {
+  const o = (entry ?? {}) as Partial<Record<keyof Objection, unknown>>;
+  if (typeof o.candidate !== "string" || typeof o.objection !== "string" || !o.objection.trim() || typeof o.quote !== "string") return null;
+  const raised = Array.isArray(o.runsRaised) ? o.runsRaised : [o.runsRaised];
+  return { candidate: o.candidate, objection: o.objection, quote: o.quote, materialSilent: o.materialSilent === true, runsRaised: raised.filter((r): r is number => typeof r === "number") };
 }
 
 export async function extractLedger(study: Study, runs: RunRecord[], ask: Ask, onDropped?: (count: number) => void): Promise<Objection[]> {
@@ -60,8 +68,10 @@ export async function extractLedger(study: Study, runs: RunRecord[], ask: Ask, o
   const names = new Map(study.candidates.map((c) => [c.name.toLowerCase(), c.name]));
   const runIds = new Set(runs.map((r) => r.run));
   const kept = found
+    .map(clean)
+    .filter((o): o is Objection => o !== null)
     // The quote is the one claim we can check, so an invented quote never reaches the report.
-    .filter((o) => names.has(String(o.candidate).toLowerCase()) && typeof o.quote === "string" && o.quote.trim() && record.includes(squash(o.quote)))
+    .filter((o) => names.has(o.candidate.toLowerCase()) && o.quote.trim() && record.includes(squash(o.quote)))
     .map((o) => ({ ...o, candidate: names.get(o.candidate.toLowerCase()) as string, runsRaised: [...new Set(o.runsRaised)].filter((r) => runIds.has(r)) }));
   if (kept.length < found.length) onDropped?.(found.length - kept.length);
   return kept;

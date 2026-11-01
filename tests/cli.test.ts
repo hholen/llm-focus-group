@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { main, type Io } from "../src/cli.js";
+import { confirmInTerminal, main, type Io } from "../src/cli.js";
 
 let dir: string;
 let yaml: string;
@@ -88,6 +88,23 @@ describe("resume costs", () => {
     const t = io(false);
     await main(["resume", join(dir, "runs", runDirs()[0]!), "--yes", "--mock"], t.value);
     expect(t.confirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("confirmInTerminal", () => {
+  it("explains what to do with no terminal", async () => {
+    const lines: string[] = [];
+    expect(await confirmInTerminal("Continue?", false, (l) => lines.push(l))).toBe(false);
+    expect(lines.join("\n")).toMatch(/--yes/);
+  });
+});
+
+describe("safety", () => {
+  it("refuses --mock on a run with real answers", async () => {
+    await main(["run", yaml, "--mock", "--out", join(dir, "runs")], io().value);
+    const folder = join(dir, "runs", runDirs()[0]!);
+    writeFileSync(join(folder, "calls.jsonl"), '{"key":"abc:0","reply":{"text":"x","usage":{"inputTokens":1,"outputTokens":1}}}\n');
+    await expect(main(["resume", folder, "--mock"], io().value)).rejects.toThrow(/real answers/);
   });
 });
 

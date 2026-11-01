@@ -19,14 +19,39 @@ export type Ask = (seat: Seat, system: string, prompt: string, options?: AskOpti
 
 const MAX_TOKENS = 4000; // generous: reasoning models spend output budget on thinking
 const MAX_RETRIES = 3;
+const TIMEOUT_MS = 10 * 60 * 1000;
+
+export interface AnthropicBlock {
+  type: string;
+  text?: string;
+  input?: { query?: string };
+  content?: unknown;
+  citations?: { url?: string }[];
+}
+export interface AnthropicResponse {
+  content?: AnthropicBlock[];
+  stop_reason?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } };
+}
+interface OpenRouterResponse {
+  choices?: { message?: { content?: string | null } }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
 export const settings = { backoffMs: 2000 };
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-export async function post(url: string, key: string, headers: Record<string, string>, body: unknown): Promise<any> {
+export async function post<T>(url: string, key: string, headers: Record<string, string>, body: unknown): Promise<T> {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
-    if (res.ok) return res.json();
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    } catch (error) {
+      if (attempt >= MAX_RETRIES) throw error;
+      await sleep(settings.backoffMs * 2 ** attempt);
+      continue;
+    }
+    if (res.ok) return res.json() as Promise<T>;
     if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
       await sleep(settings.backoffMs * 2 ** attempt);
       continue;
@@ -38,19 +63,19 @@ export async function post(url: string, key: string, headers: Record<string, str
 
 async function callAnthropic(seat: Seat, system: string, prompt: string, maxTokens: number): Promise<Reply> {
   const key = getKey("ANTHROPIC_API_KEY");
-  const data = await post(
+  const data = await post<AnthropicResponse>(
     "https://api.anthropic.com/v1/messages",
     key,
     { "x-api-key": key, "anthropic-version": "2023-06-01" },
     { model: seat.model, max_tokens: maxTokens, system, messages: [{ role: "user", content: prompt }] },
   );
-  const text = (data.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+  const text = (data.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
   return { text, usage: { inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0 } };
 }
 
 async function callOpenRouter(seat: Seat, system: string, prompt: string, maxTokens: number): Promise<Reply> {
   const key = getKey("OPENROUTER_API_KEY");
-  const data = await post(
+  const data = await post<OpenRouterResponse>(
     "https://openrouter.ai/api/v1/chat/completions",
     key,
     { authorization: `Bearer ${key}` },

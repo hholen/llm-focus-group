@@ -10,7 +10,7 @@ import { estimate, estimateCalls, loadPrices } from "./estimate.js";
 import { getKey } from "./keys.js";
 import { loadProbes, neutralise, probeCalls, probeFolder, renderProbeReport, runProbeCalls, saveProbes } from "./probe.js";
 import { mockAsk, realAsk } from "./providers.js";
-import { createRunDir, journalled, loadRun, runStudy, savedCalls } from "./runs.js";
+import { createRunDir, journalled, loadRun, realAnswers, runStudy, savedCalls } from "./runs.js";
 import { mockSearch, runSearchBallot } from "./search.js";
 import { loadStudy } from "./study.js";
 import { writeSample } from "./templates.js";
@@ -64,6 +64,7 @@ async function run(path: string, flags: { yes: boolean; mock: boolean; out: stri
 async function resume(dir: string, flags: { yes: boolean; mock: boolean }, io: Io): Promise<void> {
   const { mock } = flags;
   const { study } = loadRun(dir).snapshot;
+  if (mock && realAnswers(dir) > 0) throw new Error("This run has real answers, so --mock would mix fake replies into it.");
   if (!mock) {
     requireKeys(study);
     const cost = estimate(study, await loadPrices(study.seats));
@@ -87,7 +88,7 @@ async function probe(dir: string, path: string, flags: { yes: boolean; mock: boo
   if (runs.length < study.runs) throw new Error("This run isn't finished. Resume it first.");
   const probes = loadProbes(path);
   if (!flags.mock) requireKeys(study);
-  const folder = probeFolder(dir, probes);
+  const folder = `${probeFolder(dir, probes)}${flags.mock ? "-mock" : ""}`;
   mkdirSync(folder, { recursive: true });
   const ask = journalled(flags.mock ? mockAsk : realAsk, join(folder, "calls.jsonl"));
   const questions = await neutralise(study, probes, ask);
@@ -141,23 +142,28 @@ export async function main(argv: string[], io: Io): Promise<void> {
       io.log("Diff may make one small model call to match objections.");
       requireKeys(loadRun(second).snapshot.study);
     }
-    io.log(await diffRuns(first, second, values.mock ? mockAsk : realAsk));
+    io.log(await diffRuns(first, second, values.mock ? mockAsk : realAsk, { save: !values.mock }));
     return;
   }
   io.log(USAGE);
+}
+
+export async function confirmInTerminal(question: string, isTerminal: boolean, log: (line: string) => void): Promise<boolean> {
+  if (!isTerminal) {
+    log("There's no terminal to confirm in. Once the estimate is approved, run this again with --yes.");
+    return false;
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question(`${question} [y/N] `);
+  rl.close();
+  return /^y(es)?$/i.test(answer.trim());
 }
 
 const isMain = process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const io: Io = {
     log: console.log,
-    confirm: async (question) => {
-      if (!process.stdin.isTTY) return false;
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await rl.question(`${question} [y/N] `);
-      rl.close();
-      return /^y(es)?$/i.test(answer.trim());
-    },
+    confirm: (question) => confirmInTerminal(question, process.stdin.isTTY === true, console.log),
   };
   main(process.argv.slice(2), io).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));

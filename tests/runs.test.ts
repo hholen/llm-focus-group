@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { callsPerRun } from "../src/protocol.js";
 import { mockAsk, type Ask } from "../src/providers.js";
-import { createRunDir, journalled, loadRun, runStudy } from "../src/runs.js";
+import { createRunDir, journalled, loadRun, runStudy, savedCalls } from "../src/runs.js";
 import { study } from "./helpers.js";
 
 let root: string;
@@ -71,6 +71,36 @@ describe("journalled", () => {
     await third(seat, "s", "one");
     await third(seat, "s", "two");
     expect(c3.state.calls).toBe(0);
+  });
+});
+
+describe("journal safety", () => {
+  it("never replays mock replies as real ones", async () => {
+    const path = join(root, "calls.jsonl");
+    await journalled(mockAsk, path)(seat, "s", "p");
+    const real = counting();
+    await journalled(real.ask, path)(seat, "s", "p");
+    expect(real.state.calls).toBe(1);
+  });
+  it("counts paid replies that failed validation in usage", async () => {
+    const dir = createRunDir(small, root);
+    const ask: Ask = async () => ({ text: "bad", usage: { inputTokens: 7, outputTokens: 3 } });
+    await journalled(ask, join(dir, "calls.jsonl"))(seat, "s", "p", { valid: () => false });
+    expect(loadRun(dir).usage).toEqual({ inputTokens: 7, outputTokens: 3 });
+    expect(savedCalls(dir)).toBe(0);
+  });
+  it("counts finished searches as saved calls", async () => {
+    const dir = createRunDir(small, root);
+    writeFileSync(join(dir, "search.json"), JSON.stringify([{ usage: { inputTokens: 0, outputTokens: 0 } }]));
+    expect(savedCalls(dir)).toBe(1);
+  });
+  it("marks a run unfinished until the ledger is saved", async () => {
+    const dir = createRunDir(small, root);
+    const bad: Ask = (s, y, p) => (p.includes("EXTRACT OBJECTIONS") ? Promise.reject(new Error("down")) : mockAsk(s, y, p));
+    await expect(runStudy(small, dir, bad)).rejects.toThrow("down");
+    expect(loadRun(dir).finished).toBe(false);
+    await runStudy(small, dir, mockAsk);
+    expect(loadRun(dir).finished).toBe(true);
   });
 });
 

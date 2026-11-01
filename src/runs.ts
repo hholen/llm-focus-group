@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { maskStudy, unmaskLedger, unmaskRun } from "./blind.js";
 import { extractLedger, type Objection } from "./ledger.js";
 import { runSession, type RunRecord } from "./protocol.js";
-import type { Ask, Reply, Usage } from "./providers.js";
+import { mockAsk, type Ask, type Reply, type Usage } from "./providers.js";
 import { renderReport } from "./report.js";
 import { runSearchBallot, searchSeats, type Search, type SearchResult } from "./search.js";
 import type { Study } from "./types.js";
@@ -16,6 +16,7 @@ export interface Snapshot {
   study: Study;
 }
 
+const MOCK_KEY = "mock:";
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 const toolVersion = (): string => (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
@@ -33,38 +34,42 @@ export function createRunDir(study: Study, root: string): string {
   return dir;
 }
 
-function readJournal(path: string): Map<string, Reply> {
+function readJournal(path: string): { replies: Map<string, Reply>; rejected: Usage[] } {
   const entries = new Map<string, Reply>();
-  if (!existsSync(path)) return entries;
+  const rejected: Usage[] = [];
+  if (!existsSync(path)) return { replies: entries, rejected };
   const raw = readFileSync(path, "utf8");
   // A crash mid-write leaves a partial last line. End it so later appends start clean.
   if (raw && !raw.endsWith("\n")) appendFileSync(path, "\n");
   for (const line of raw.split("\n")) {
     if (!line) continue;
     try {
-      const entry = JSON.parse(line) as { key: string; reply: Reply };
+      const entry = JSON.parse(line) as { key?: string; reply?: Reply; rejected?: Usage };
       if (entry.key && entry.reply) entries.set(entry.key, entry.reply);
+      if (entry.rejected) rejected.push(entry.rejected);
     } catch {
       /* broken line: that call runs again */
     }
   }
-  return entries;
+  return { replies: entries, rejected };
 }
 
 /** Wraps an Ask so each finished call is saved and never paid for twice. */
 export function journalled(ask: Ask, path: string): Ask {
-  const saved = readJournal(path);
+  const saved = readJournal(path).replies;
+  const salt = ask === mockAsk ? MOCK_KEY : ""; // a mock reply must never pass as a paid one
   const seen = new Map<string, number>();
   return async (seat, system, prompt, options) => {
     const valid = options?.valid ?? (() => true);
     const base = sha(JSON.stringify([seat.name, seat.route, seat.model, system, prompt]));
     const repeat = seen.get(base) ?? 0;
     seen.set(base, repeat + 1);
-    const key = `${base}:${repeat}`; // identical prompts can recur, so each keeps its own answer
+    const key = `${salt}${base}:${repeat}`; // identical prompts can recur, so each keeps its own answer
     const known = saved.get(key);
     if (known && valid(known.text)) return known;
     const reply = await ask(seat, system, prompt, options);
-    if (valid(reply.text)) appendFileSync(path, `${JSON.stringify({ key, reply })}\n`);
+    // A rejected reply is never replayed, but it was paid for, so usage still counts it.
+    appendFileSync(path, `${JSON.stringify(valid(reply.text) ? { key, reply } : { rejected: reply.usage })}\n`);
     return reply;
   };
 }
@@ -88,21 +93,21 @@ const loadSearch = (dir: string) => readJson<SearchResult[]>(join(dir, "search.j
 
 export async function runStudy(study: Study, dir: string, ask: Ask, search: Search = runSearchBallot, onRun?: (done: number, total: number) => void): Promise<RunRecord[]> {
   const logged = journalled(ask, join(dir, "calls.jsonl"));
-  const save = (runs: RunRecord[], ledger: Objection[]) => writeAtomic(join(dir, "results.json"), JSON.stringify({ runs, ledger }, null, 2));
+  const save = (runs: RunRecord[], ledger: Objection[], finished: boolean) => writeAtomic(join(dir, "results.json"), JSON.stringify({ runs, ledger, finished }, null, 2));
   const blind = study.blind ? maskStudy(study) : undefined;
   const panel = blind?.study ?? study;
   const shownRuns: RunRecord[] = [];
   const realRuns = () => (blind ? shownRuns.map((r) => unmaskRun(r, blind.labels)) : shownRuns);
   for (let run = 0; run < study.runs; run++) {
     shownRuns.push(await runSession(panel, run, logged));
-    save(realRuns(), []);
+    save(realRuns(), [], false);
     onRun?.(run + 1, study.runs);
   }
   let dropped = 0;
   const extracted = await extractLedger(panel, shownRuns, logged, (count) => { dropped = count; });
   const ledger = blind ? unmaskLedger(extracted, blind.labels) : extracted;
   const runs = realRuns();
-  save(runs, ledger);
+  save(runs, ledger, true);
   if (study.searchBallot) {
     const results = loadSearch(dir);
     for (let run = 0; run < study.runs; run++) {
@@ -117,16 +122,21 @@ export async function runStudy(study: Study, dir: string, ask: Ask, search: Sear
   return runs;
 }
 
-export const savedCalls = (dir: string): number => readJournal(join(dir, "calls.jsonl")).size;
+/** Calls answered by a real provider, as opposed to the mock. */
+export const realAnswers = (dir: string): number =>
+  [...readJournal(join(dir, "calls.jsonl")).replies.keys()].filter((key) => !key.startsWith(MOCK_KEY)).length;
 
-export function loadRun(dir: string): { snapshot: Snapshot; runs: RunRecord[]; ledger: Objection[]; search: SearchResult[]; usage: Usage } {
+export const savedCalls = (dir: string): number => realAnswers(dir) + loadSearch(dir).length;
+
+export function loadRun(dir: string): { snapshot: Snapshot; runs: RunRecord[]; ledger: Objection[]; search: SearchResult[]; usage: Usage; finished: boolean } {
   const snapshot = JSON.parse(readFileSync(join(dir, "snapshot.json"), "utf8")) as Snapshot;
-  const { runs, ledger } = readJson<{ runs: RunRecord[]; ledger: Objection[] }>(join(dir, "results.json"), { runs: [], ledger: [] });
+  const { runs, ledger, finished = true } = readJson<{ runs: RunRecord[]; ledger: Objection[]; finished?: boolean }>(join(dir, "results.json"), { runs: [], ledger: [] });
   const usage: Usage = { inputTokens: 0, outputTokens: 0 };
   const search = loadSearch(dir);
-  for (const { usage: used } of [...readJournal(join(dir, "calls.jsonl")).values(), ...search]) {
+  const journal = readJournal(join(dir, "calls.jsonl"));
+  for (const used of [...[...journal.replies.values(), ...search].map((r) => r.usage), ...journal.rejected]) {
     usage.inputTokens += used.inputTokens;
     usage.outputTokens += used.outputTokens;
   }
-  return { snapshot, runs, ledger, search, usage };
+  return { snapshot, runs, ledger, search, usage, finished };
 }
