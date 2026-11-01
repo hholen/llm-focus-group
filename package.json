@@ -1,0 +1,51 @@
+{
+  "name": "llm-focus-group",
+  "version": "0.1.0",
+  "description": "Run focus groups where LLMs speak as themselves.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "llm-focus-group": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && cp src/prices.json dist/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "author": "Henrik Holen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hholen/llm-focus-group.git"
+  },
+  "homepage": "https://github.com/hholen/llm-focus-group#readme",
+  "bugs": "https://github.com/hholen/llm-focus-group/issues",
+  "keywords": [
+    "llm",
+    "focus-group",
+    "ai",
+    "cli",
+    "agents",
+    "claude",
+    "openai",
+    "gemini"
+  ]
+}
