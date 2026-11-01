@@ -20,7 +20,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/prices.json dist/",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "yaml": "^2.9.1"
