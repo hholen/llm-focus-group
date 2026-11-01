@@ -65,9 +65,9 @@ describe("loadStudy", () => {
     writeFileSync(join(dir, "scenario.md"), "\n");
     expect(() => loadStudy(write())).toThrow(/scenario/);
   });
-  it("rejects a search ballot with no anthropic seat", () => {
-    const seats = [{ name: "GPT", route: "openrouter", model: "g" }];
-    expect(() => loadStudy(write({ seats, searchBallot: true }))).toThrow(/search ballot.*anthropic/i);
+  it("allows a search ballot with no anthropic seat", () => {
+    const seats = [{ name: "GPT", route: "openrouter", model: "g" }, { name: "Gemini", route: "openrouter", model: "h" }];
+    expect(loadStudy(write({ seats, searchBallot: true })).searchBallot).toBe(true);
   });
   it("rejects two candidates with the same name", () => {
     const candidates = [{ name: "Acme", material: "m/acme" }, { name: "acme", material: "m/zed" }];

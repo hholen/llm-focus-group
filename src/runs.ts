@@ -6,7 +6,7 @@ import { extractLedger, type Objection } from "./ledger.js";
 import { runSession, type RunRecord } from "./protocol.js";
 import { mockAsk, type Ask, type Reply, type Usage } from "./providers.js";
 import { renderReport } from "./report.js";
-import { runSearchBallot, searchSeats, type Search, type SearchResult } from "./search.js";
+import { runSearchBallot, type Search, type SearchResult } from "./search.js";
 import type { Study } from "./types.js";
 
 export interface Snapshot {
@@ -111,7 +111,7 @@ export async function runStudy(study: Study, dir: string, ask: Ask, search: Sear
   if (study.searchBallot) {
     const results = loadSearch(dir);
     for (let run = 0; run < study.runs; run++) {
-      for (const seat of searchSeats(study)) {
+      for (const seat of study.seats) {
         if (results.some((r) => r.run === run && r.model === seat.model)) continue;
         results.push(await search(study, run, seat));
         writeAtomic(join(dir, "search.json"), JSON.stringify(results, null, 2));

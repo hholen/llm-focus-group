@@ -15,7 +15,7 @@ const fallback = (createRequire(import.meta.url)("./prices.json") as { models: P
 const TURN_TOKENS = 200; // a turn is capped at about 120 words
 const OUTPUT_LOW = 150;
 const OUTPUT_HIGH = 800; // reasoning models bill thinking as output
-const SEARCH_USD = 0.01; // Anthropic web search, per search
+const SEARCH_USD = 0.014; // per search: Anthropic and GPT charged $0.01, Gemini $0.014
 const SEARCHES_MAX = 5;
 const SEARCH_INPUT_LOW = 20_000; // search results count as input: 23-57k per session in the spike
 const SEARCH_INPUT_HIGH = 60_000;
@@ -55,7 +55,7 @@ export function estimateCalls(calls: { seat: Seat; prompt: string }[], prices: P
 
 export function estimate(study: Study, prices: Prices): Estimate {
   const seats = study.seats.length;
-  const searching = study.searchBallot ? study.seats.filter((s) => s.route === "anthropic") : [];
+  const searching = study.searchBallot ? study.seats : [];
   const searchCalls = searching.length * study.runs;
   const calls = callsPerRun(seats, study.rounds) * study.runs + 1 + searchCalls;
   const unpriced = [...new Set(study.seats.map((s) => s.model))].filter((m) => !prices[m]);

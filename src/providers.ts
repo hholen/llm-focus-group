@@ -33,9 +33,9 @@ export interface AnthropicResponse {
   stop_reason?: string;
   usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } };
 }
-interface OpenRouterResponse {
-  choices?: { message?: { content?: string | null } }[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+export interface OpenRouterResponse {
+  choices?: { message?: { content?: string | null; annotations?: { url_citation?: { url?: string; title?: string } }[] } }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number; server_tool_use_details?: { web_search_requests?: number } };
 }
 export const settings = { backoffMs: 2000 };
 

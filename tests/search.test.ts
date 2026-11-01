@@ -61,6 +61,60 @@ describe("runSearchBallot", () => {
   });
 });
 
+const chat = (over: { text?: string; annotations?: object[]; searches?: number } = {}) => new Response(JSON.stringify({
+  choices: [{ message: { content: over.text ?? 'I choose.\n{"choice": "Acme", "runner_up": "Zed", "confidence": 70, "reasoning": "r"}', annotations: over.annotations ?? [] } }],
+  usage: { prompt_tokens: 12, completion_tokens: 6, server_tool_use_details: { web_search_requests: over.searches ?? 2 } },
+}));
+const cite = (url: string, title: string) => ({ type: "url_citation", url_citation: { url, title, start_index: 0, end_index: 5 } });
+
+describe("runSearchBallot on an openrouter seat", () => {
+  beforeEach(() => { process.env.OPENROUTER_API_KEY = "k"; });
+  it("asks chat completions with the web search tool", async () => {
+    const fn = stub(chat());
+    await runSearchBallot(base, 0, gpt);
+    expect(fn.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/chat/completions");
+    const body = JSON.parse(fn.mock.calls[0]?.[1].body as string);
+    expect(body.model).toBe("o");
+    expect(body.tools).toEqual([{ type: "openrouter:web_search", parameters: { max_uses: 5 } }]);
+  });
+  it("reads the ballot, usage and search count", async () => {
+    stub(chat());
+    const r = await runSearchBallot(base, 0, gpt);
+    expect(r.label).toBe("Acme");
+    expect(r.searches).toBe(2);
+    expect(r.usage).toEqual({ inputTokens: 12, outputTokens: 6 });
+  });
+  it("counts citations as both cited and seen, because nothing else is returned", async () => {
+    stub(chat({ annotations: [cite("https://www.sortly.com/pricing/", "Pricing")] }));
+    const r = await runSearchBallot(base, 0, gpt);
+    expect(r.cited).toEqual(["https://www.sortly.com/pricing/"]);
+    expect(r.urls).toEqual(["https://www.sortly.com/pricing/"]);
+  });
+  it("swaps a Gemini redirect for the domain in its title", async () => {
+    stub(chat({ annotations: [cite("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZ", "geotab.com")] }));
+    const r = await runSearchBallot(base, 0, gpt);
+    expect(r.cited).toEqual(["https://geotab.com"]);
+  });
+  it("drops a Gemini redirect whose title is not a domain", async () => {
+    stub(chat({ annotations: [cite("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZ", "Best tools")] }));
+    const r = await runSearchBallot(base, 0, gpt);
+    expect(r.cited).toEqual([]);
+  });
+  it("retries once when the first reply has no ballot, keeping both costs", async () => {
+    const fn = stub(chat({ text: "no json", searches: 1 }), chat({ searches: 1 }));
+    const r = await runSearchBallot(base, 0, gpt);
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(r.label).toBe("Acme");
+    expect(r.searches).toBe(2);
+    expect(r.usage.inputTokens).toBe(24);
+  });
+  it("survives a reply with no content", async () => {
+    stub(new Response(JSON.stringify({ choices: [{ message: { content: null } }] })), new Response("{}"));
+    const r = await runSearchBallot(base, 0, gpt);
+    expect(r.label).toBe("No ballot");
+  });
+});
+
 describe("searchReport", () => {
   const r = (over: Partial<SearchResult>): SearchResult => ({ model: "m", run: 0, choice: "Acme", label: "Acme", queries: [], urls: [], cited: [], searches: 1, usage: { inputTokens: 0, outputTokens: 0 }, ...over });
   const s = study({ candidates: [{ ...candidate("Acme"), domains: ["acme.io"] }, candidate("Big Zed")] });
@@ -82,8 +136,23 @@ describe("searchReport", () => {
     expect(out).toContain("capterra.com: 1");
     expect(out).toContain("best tool");
   });
-  it("says only Anthropic models searched", () => {
-    expect(searchReport(s, [r({})])).toMatch(/Anthropic/);
+  it("warns that OpenRouter seats only show citations", () => {
+    const seats: Seat[] = [claude, gpt];
+    expect(searchReport({ ...s, seats }, [r({ model: "o" })])).toMatch(/undercount/);
+  });
+  it("leaves the warning out when every seat is Anthropic", () => {
+    expect(searchReport({ ...s, seats: [claude] }, [r({ model: "claude-x" })])).not.toMatch(/undercount/);
+  });
+  it("splits picks by model", () => {
+    const out = searchReport({ ...s, seats: [claude, gpt] }, [r({ model: "claude-x" }), r({ model: "o", label: "Other: X" }), r({ model: "o", label: "Other: X" })]);
+    expect(out).toContain("- claude-x: Acme 1");
+    expect(out).toContain("- o: Other: X 2");
+  });
+  it("says queries were not returned when a seat searched without showing them", () => {
+    expect(searchReport(s, [r({ model: "o", searches: 2 })])).toContain("Run 1, o: not returned");
+  });
+  it("says none when a seat did not search", () => {
+    expect(searchReport(s, [r({ model: "o", searches: 0 })])).toContain("Run 1, o: none");
   });
 });
 
@@ -100,7 +169,7 @@ describe("runStudy with search", () => {
     const dir = createRunDir(s, root());
     await runStudy(s, dir, mockAsk, mockSearch);
     expect(readFileSync(join(dir, "report.md"), "utf8")).toContain("## Search ballot");
-    expect(loadRun(dir).search.length).toBe(1);
+    expect(loadRun(dir).search.length).toBe(2);
   });
   it("keeps one seat's finished search when another fails", async () => {
     const seats = [claude, { ...claude, name: "Opus", model: "claude-y" }];
@@ -114,6 +183,12 @@ describe("runStudy with search", () => {
     const second = vi.fn(mockSearch);
     await runStudy(s, dir, mockAsk, second);
     expect(second).toHaveBeenCalledTimes(1);
+  });
+  it("searches on every seat, whatever its route", async () => {
+    const s = { ...base, searchBallot: true };
+    const dir = createRunDir(s, root());
+    await runStudy(s, dir, mockAsk, mockSearch);
+    expect(loadRun(dir).search.map((r) => r.model)).toEqual(["claude-x", "o"]);
   });
   it("does not repeat finished searches on resume", async () => {
     const s = { ...base, searchBallot: true };

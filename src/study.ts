@@ -62,7 +62,6 @@ export function loadStudy(path: string): Study {
 
   const scenario = readFileSync(resolve(root, scenarioPath), "utf8").trim();
   if (!scenario) fail(`scenario file ${scenarioPath} is empty.`);
-  if (raw.searchBallot === true && !loadedSeats.some((s) => s.route === "anthropic")) fail("the search ballot needs at least one seat with route: anthropic.");
 
   return {
     scenario,

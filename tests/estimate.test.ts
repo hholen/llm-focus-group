@@ -9,12 +9,17 @@ describe("estimate", () => {
     expect(estimate(study({ rounds: 3, runs: 5 }), prices).calls).toBe(211);
   });
   it("counts search ballot calls", () => {
-    expect(estimate(study({ rounds: 3, runs: 5, searchBallot: true }), prices).calls).toBe(216);
+    expect(estimate(study({ rounds: 3, runs: 5, searchBallot: true }), prices).calls).toBe(226);
   });
   it("adds search fees to the high figure", () => {
     const off = estimate(study({ searchBallot: false }), prices).usdHigh as number;
     const on = estimate(study({ searchBallot: true }), prices).usdHigh as number;
     expect(on).toBeGreaterThan(off);
+  });
+  it("prices search at the dearest fee seen, on every seat", () => {
+    const fees = estimate(study({ runs: 1, seats: [{ name: "GPT", route: "openrouter", model: "o" }], searchBallot: true }), { o: [0, 0] });
+    expect(fees.usdLow).toBeCloseTo(0.014);
+    expect(fees.usdHigh).toBeCloseTo(0.07);
   });
   it("prices search tokens as well as search fees", () => {
     const off = estimate(study(), prices).usdLow as number;

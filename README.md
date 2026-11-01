@@ -27,7 +27,7 @@ Your material is sent to the providers you choose. There is no telemetry.
 
 Each run takes an unprompted ballot, a ballot after reading, control ballots with no discussion, then moderated rounds with private ballots, and closing statements. Product order, seat order and the moderator rotate between runs.
 
-The report leads with evidence warnings, objections and documentation gaps, followed by ballots with sample sizes, discussion effects and transcripts. Set `blind: true` to mask product names, and `searchBallot: true` to test whether a model finds a product by web search (Anthropic models only).
+The report leads with evidence warnings, objections and documentation gaps, followed by ballots with sample sizes, discussion effects and transcripts. Set `blind: true` to mask product names, and `searchBallot: true` to test whether a model finds a product by web search. Every seat searches, once per run. OpenRouter models report only the pages they cited, not their queries or everything they saw, and the report says so.
 
 ## Testing a change before you build it
 
