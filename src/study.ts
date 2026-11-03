@@ -55,11 +55,12 @@ export function loadStudy(path: string): Study {
 
   const loadedSeats: Seat[] = seats.map((s) => {
     const route = s.route;
-    if (route !== "anthropic" && route !== "openrouter") fail(`seat route must be anthropic or openrouter, got ${String(route)}.`);
+    if (route !== "anthropic" && route !== "openrouter" && route !== "claude-cli") fail(`seat route must be anthropic, openrouter or claude-cli, got ${String(route)}.`);
     return { name: text(s.name, "seat name"), route: route as Route, model: text(s.model, "seat model") };
   });
   if (new Set(loadedSeats.map((s) => s.name)).size !== loadedSeats.length) fail("two seats have the same name.");
 
+  if (raw.searchBallot === true && loadedSeats.some((s) => s.route === "claude-cli")) fail("the search ballot doesn't work with claude-cli seats yet, because claude -p doesn't report what it searched.");
   const scenario = readFileSync(resolve(root, scenarioPath), "utf8").trim();
   if (!scenario) fail(`scenario file ${scenarioPath} is empty.`);
 

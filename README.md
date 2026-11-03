@@ -21,6 +21,8 @@ Want to see the output first? [`examples/report.md`](examples/report.md) is a re
 
 You need one `OPENROUTER_API_KEY`. `run` shows an estimate and asks before spending. If a run stops, `llm-focus-group resume <run-folder>` carries on without repaying finished calls.
 
+Have Claude Code? A seat with `route: claude-cli` and a model such as `claude-sonnet-5-5` runs through `claude -p` on your Claude plan, with no API key. It runs in safe mode, so your CLAUDE.md, skills and hooks stay out of the panel, but Claude Code still adds a short note of its own: that it's an agent, your account email, and the date. It's slower, uses your plan's limits, and a Claude-only panel is one provider, so use it to iterate and an API run to decide. The search ballot doesn't work on these seats yet.
+
 Your material is sent to the providers you choose. There is no telemetry.
 
 ## What a session does

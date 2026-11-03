@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getKey } from "../src/keys.js";
-import { mockAsk, realAsk, settings } from "../src/providers.js";
+import { claudeEnv, keyName, mockAsk, realAsk, settings } from "../src/providers.js";
 import type { Seat } from "../src/types.js";
 
 vi.mock("node:child_process", () => ({ execFileSync: vi.fn(() => "from-keychain\n") }));
@@ -79,6 +79,48 @@ describe("realAsk", () => {
   it("error messages never contain the key", async () => {
     stub(new Response(`bad key ${SECRET}`, { status: 401 }));
     await expect(realAsk(gpt, "s", "p")).rejects.not.toThrow(SECRET);
+  });
+});
+
+describe("claude-cli seats", () => {
+  const cli: Seat = { name: "Claude", route: "claude-cli", model: "claude-x" };
+  const reply = (over: object = {}) => JSON.stringify({ type: "result", is_error: false, result: "hi", usage: { input_tokens: 5, cache_creation_input_tokens: 10, cache_read_input_tokens: 100, output_tokens: 7 }, ...over });
+  const original = settings.runClaude;
+  afterEach(() => { settings.runClaude = original; });
+  it("asks claude -p with the panel's system prompt, no tools and no customisations", async () => {
+    const run = vi.fn(async (_args: string[], _input: string) => reply());
+    settings.runClaude = run;
+    const out = await realAsk(cli, "sys", "prompt");
+    const [args, input] = run.mock.calls[0] as [string[], string];
+    expect(input).toBe("prompt");
+    expect(args).toEqual(expect.arrayContaining(["-p", "--safe-mode", "--no-session-persistence", "--strict-mcp-config"]));
+    expect(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2)).toEqual(["--model", "claude-x"]);
+    expect(args.slice(args.indexOf("--system-prompt"), args.indexOf("--system-prompt") + 2)).toEqual(["--system-prompt", "sys"]);
+    expect(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
+    expect(args.slice(args.indexOf("--output-format"), args.indexOf("--output-format") + 2)).toEqual(["--output-format", "json"]);
+    expect(out).toEqual({ text: "hi", usage: { inputTokens: 115, outputTokens: 7 } });
+  });
+  it("stops with claude's own message when it reports an error", async () => {
+    settings.runClaude = async () => reply({ is_error: true, result: "Usage limit reached" });
+    await expect(realAsk(cli, "s", "p")).rejects.toThrow(/claude -p.*Usage limit reached/);
+  });
+  it("stops with a readable error when the reply is not JSON", async () => {
+    settings.runClaude = async () => "Not logged in";
+    await expect(realAsk(cli, "s", "p")).rejects.toThrow(/claude -p.*Not logged in/);
+  });
+  it("asks again once when the reply is empty", async () => {
+    const run = vi.fn(async () => (run.mock.calls.length === 1 ? reply({ result: "" }) : reply()));
+    settings.runClaude = run;
+    expect((await realAsk(cli, "s", "p")).text).toBe("hi");
+  });
+  it("hides API keys from claude, so calls use the Claude plan rather than paid API calls", () => {
+    const env = claudeEnv({ PATH: "/bin", ANTHROPIC_API_KEY: "k", ANTHROPIC_AUTH_TOKEN: "t", OPENROUTER_API_KEY: "o" });
+    expect(env).toEqual({ PATH: "/bin", OPENROUTER_API_KEY: "o" });
+  });
+  it("needs no API key", () => {
+    expect(keyName("claude-cli")).toBeNull();
+    expect(keyName("anthropic")).toBe("ANTHROPIC_API_KEY");
+    expect(keyName("openrouter")).toBe("OPENROUTER_API_KEY");
   });
 });
 

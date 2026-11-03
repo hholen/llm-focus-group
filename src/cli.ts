@@ -9,7 +9,7 @@ import { diffRuns } from "./diff.js";
 import { estimate, estimateCalls, loadPrices } from "./estimate.js";
 import { getKey } from "./keys.js";
 import { loadProbes, neutralise, probeCalls, probeFolder, renderProbeReport, runProbeCalls, saveProbes } from "./probe.js";
-import { mockAsk, realAsk } from "./providers.js";
+import { keyName, mockAsk, realAsk } from "./providers.js";
 import { createRunDir, journalled, loadRun, realAnswers, runStudy, savedCalls } from "./runs.js";
 import { mockSearch, runSearchBallot } from "./search.js";
 import { loadStudy } from "./study.js";
@@ -31,7 +31,10 @@ const USAGE = `Usage:
   llm-focus-group probe <run-folder> <probes.yaml> [--yes] [--mock]`;
 
 function requireKeys(study: Study): void {
-  for (const route of new Set(study.seats.map((s) => s.route))) getKey(route === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY");
+  for (const route of new Set(study.seats.map((s) => s.route))) {
+    const name = keyName(route);
+    if (name) getKey(name);
+  }
 }
 
 const money = (n: number | null) => (n === null ? "unknown" : `$${n.toFixed(2)}`);
@@ -49,6 +52,7 @@ async function run(path: string, flags: { yes: boolean; mock: boolean; out: stri
     const cost = estimate(study, await loadPrices(study.seats));
     io.log(`Estimated ${cost.calls} calls, ${money(cost.usdLow)} to ${money(cost.usdHigh)}. This is an estimate, not a quote.`);
     if (cost.unpriced.length) io.log(`No price found for: ${cost.unpriced.join(", ")}.`);
+    if (study.seats.some((s) => s.route === "claude-cli")) io.log("claude-cli seats run on your Claude plan, so they're counted as $0 here but use your plan's limits.");
     io.log(`Your material will be sent to: ${[...new Set(study.seats.map((s) => s.route))].join(", ")}.`);
     if (!flags.yes && !(await io.confirm("Continue?"))) {
       io.log("Stopped. Nothing was sent.");

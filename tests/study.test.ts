@@ -73,6 +73,14 @@ describe("loadStudy", () => {
     const candidates = [{ name: "Acme", material: "m/acme" }, { name: "acme", material: "m/zed" }];
     expect(() => loadStudy(write({ candidates }))).toThrow(/same name/);
   });
+  it("accepts a claude-cli seat", () => {
+    const seats = [{ name: "Claude", route: "claude-cli", model: "claude-sonnet-5-5" }];
+    expect(loadStudy(write({ seats })).seats[0]?.route).toBe("claude-cli");
+  });
+  it("rejects a search ballot with a claude-cli seat, which can't report searches yet", () => {
+    const seats = [{ name: "Claude", route: "claude-cli", model: "c" }, { name: "GPT", route: "openrouter", model: "g" }];
+    expect(() => loadStudy(write({ seats, searchBallot: true }))).toThrow(/search ballot.*claude-cli/i);
+  });
   it("rejects an unknown seat route", () => {
     expect(() => loadStudy(write({ seats: [{ name: "X", route: "fax", model: "m" }] }))).toThrow(/route/);
   });

@@ -50,6 +50,12 @@ describe("loadPrices", () => {
     expect(p["claude-sonnet-5-5"]?.[0]).toBeCloseTo(2);
     vi.unstubAllGlobals();
   });
+  it("prices claude-cli seats at zero, because they use the Claude plan", async () => {
+    vi.stubGlobal("fetch", async () => { throw new Error("offline"); });
+    const p = await loadPrices([{ name: "C", route: "claude-cli", model: "claude-sonnet-5-5" }]);
+    expect(p["claude-sonnet-5-5"]).toEqual([0, 0]);
+    vi.unstubAllGlobals();
+  });
   it("falls back to saved prices when the list is unreachable", async () => {
     vi.stubGlobal("fetch", async () => { throw new Error("offline"); });
     const p = await loadPrices([{ name: "C", route: "openrouter", model: "google/gemini-4-argon" }]);

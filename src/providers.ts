@@ -37,7 +37,38 @@ export interface OpenRouterResponse {
   choices?: { message?: { content?: string | null; annotations?: { url_citation?: { url?: string; title?: string } }[] } }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; server_tool_use_details?: { web_search_requests?: number } };
 }
-export const settings = { backoffMs: 2000 };
+/** Runs `claude` with these arguments and stdin, resolving with stdout. Swapped out in tests. */
+export type RunClaude = (args: string[], input: string) => Promise<string>;
+
+/** API keys are removed so claude uses the signed-in Claude plan, not paid API calls. */
+export function claudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { ANTHROPIC_API_KEY: _key, ANTHROPIC_AUTH_TOKEN: _token, ...rest } = env;
+  return rest;
+}
+
+const runClaude: RunClaude = async (args, input) => {
+  const [{ spawn }, { mkdtempSync, rmSync }, { tmpdir }, { join }] = await Promise.all([import("node:child_process"), import("node:fs"), import("node:os"), import("node:path")]);
+  const cwd = mkdtempSync(join(tmpdir(), "lfg-claude-")); // empty, so no project files or settings load
+  try {
+    return await new Promise<string>((done, fail) => {
+      const child = spawn("claude", args, { cwd, env: claudeEnv(process.env), timeout: TIMEOUT_MS });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      child.on("error", (error) => fail(new Error(`Couldn't start claude: ${error.message}. Is Claude Code installed?`)));
+      child.on("close", () => done(stdout || stderr));
+      child.stdin.end(input);
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+};
+
+export const settings: { backoffMs: number; runClaude: RunClaude } = { backoffMs: 2000, runClaude };
+
+export const keyName = (route: Seat["route"]): string | null =>
+  route === "anthropic" ? "ANTHROPIC_API_KEY" : route === "openrouter" ? "OPENROUTER_API_KEY" : null;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
@@ -87,9 +118,33 @@ async function callOpenRouter(seat: Seat, system: string, prompt: string, maxTok
   };
 }
 
+interface ClaudeCliResult {
+  is_error?: boolean;
+  result?: string;
+  usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number };
+}
+
+/** Runs on the signed-in Claude plan. claude -p has no output limit flag, so maxTokens is not applied. */
+async function callClaudeCli(seat: Seat, system: string, prompt: string): Promise<Reply> {
+  const args = ["-p", "--model", seat.model, "--system-prompt", system, "--tools", "", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--safe-mode"];
+  const raw = await settings.runClaude(args, prompt);
+  let data: ClaudeCliResult;
+  try {
+    data = JSON.parse(raw) as ClaudeCliResult;
+  } catch {
+    throw new Error(`claude -p gave no JSON reply: ${raw.trim().slice(0, 300)}`);
+  }
+  if (data.is_error) throw new Error(`claude -p reported an error: ${(data.result ?? "").slice(0, 300)}`);
+  const u = data.usage ?? {};
+  return {
+    text: data.result ?? "",
+    usage: { inputTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0), outputTokens: u.output_tokens ?? 0 },
+  };
+}
+
 export const realAsk: Ask = async (seat, system, prompt, options) => {
   const maxTokens = options?.maxTokens ?? MAX_TOKENS;
-  const call = seat.route === "anthropic" ? callAnthropic : callOpenRouter;
+  const call = seat.route === "anthropic" ? callAnthropic : seat.route === "claude-cli" ? callClaudeCli : callOpenRouter;
   const first = await call(seat, system, prompt, maxTokens);
   if (first.text.trim()) return first;
   const second = await call(seat, system, prompt, maxTokens);

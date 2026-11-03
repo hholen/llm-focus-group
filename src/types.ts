@@ -1,4 +1,4 @@
-export type Route = "anthropic" | "openrouter";
+export type Route = "anthropic" | "openrouter" | "claude-cli";
 
 export interface Seat {
   name: string;

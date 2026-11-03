@@ -35,6 +35,10 @@ export async function loadPrices(seats: Seat[]): Promise<Prices> {
   }
   const out: Prices = {};
   for (const seat of seats) {
+    if (seat.route === "claude-cli") {
+      out[seat.model] = [0, 0]; // runs on the Claude plan
+      continue;
+    }
     const price = live[listId(seat)] ?? fallback[listId(seat)];
     if (price) out[seat.model] = price;
   }
