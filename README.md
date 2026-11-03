@@ -1,5 +1,7 @@
 # llm-focus-group
 
+![Claude, Gemini and GPT around a focus group table](docs/focus-group.jpg)
+
 Run a focus group where the participants are LLMs speaking as themselves. Show them your product and its rivals, let them argue across providers, and find out why an AI agent would or wouldn't recommend you.
 
 ## Read this first
