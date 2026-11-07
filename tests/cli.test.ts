@@ -126,3 +126,13 @@ describe("usage", () => {
     expect(t.lines.join("\n")).toMatch(/Usage/);
   });
 });
+
+describe("help", () => {
+  // The first thing a new user types. It must print the commands, not throw on an unknown option.
+  it.each([["--help"], ["-h"], ["help"]])("%s prints the usage", async (arg) => {
+    const t = io();
+    await main([arg], t.value);
+    expect(t.lines.join("\n")).toMatch(/^Usage:/);
+    expect(t.lines.join("\n")).toContain("llm-focus-group demo");
+  });
+});

@@ -122,8 +122,12 @@ export async function main(argv: string[], io: Io): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { yes: { type: "boolean", default: false }, mock: { type: "boolean", default: false }, out: { type: "string", default: "runs" } },
+    options: { yes: { type: "boolean", default: false }, mock: { type: "boolean", default: false }, out: { type: "string", default: "runs" }, help: { type: "boolean", short: "h", default: false } },
   });
+  if (values.help) {
+    io.log(USAGE);
+    return;
+  }
   const [command, first, second] = positionals;
   if (command === "init") {
     const folder = first ?? "focus-group-study";
