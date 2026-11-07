@@ -13,17 +13,18 @@ When we showed models one product at a time, every product ended up chosen, incl
 ## Try it
 
 ```bash
-npx llm-focus-group demo                # free, mock replies
-npx llm-focus-group init my-study       # sample study with fictional products
-npx llm-focus-group run my-study/study.yaml
-npx llm-focus-group diff runs/<a> runs/<b>
-npx llm-focus-group probe runs/<a> my-study/probes.yaml
-npx llm-focus-group models              # current model IDs
+npx github:hholen/llm-focus-group demo             # free, mock replies
+npx github:hholen/llm-focus-group init my-study    # sample study with fictional products
+npx github:hholen/llm-focus-group run my-study/study.yaml
+npx github:hholen/llm-focus-group diff runs/<a> runs/<b>
+npx github:hholen/llm-focus-group probe runs/<a> my-study/probes.yaml
+npx github:hholen/llm-focus-group models           # current model IDs
+npx github:hholen/llm-focus-group --help
 ```
 
 Want to see the output first? [`examples/report.md`](examples/report.md) is a real report from the sample study, with fictional products and real model replies.
 
-You need one `OPENROUTER_API_KEY`. `run` shows an estimate and asks before spending. If a run stops, `llm-focus-group resume <run-folder>` carries on without repaying finished calls.
+It installs straight from GitHub; the first run takes a few seconds while it builds. You need one `OPENROUTER_API_KEY`, in your environment, a `.env` file or the macOS keychain (service name `OPENROUTER_API_KEY`). `run` shows an estimate and asks before spending. If a run stops, `npx github:hholen/llm-focus-group resume <run-folder>` carries on without repaying finished calls.
 
 Have Claude Code? A seat with `route: claude-cli` and a model such as `claude-sonnet-5-5` runs through `claude -p` on your Claude plan, with no API key. It runs in safe mode, so your CLAUDE.md, skills and hooks stay out of the panel, but Claude Code still adds a short note of its own: that it's an agent, your account email, and the date. It's slower, uses your plan's limits, and a Claude-only panel is one provider, so use it to iterate and an API run to decide. The search ballot doesn't work on these seats yet.
 
